@@ -21,10 +21,8 @@ const redirectsEvaluator = generateRedirectsEvaluator(redirectsFileContents, {
 export default class extends WorkerEntrypoint<Env> {
 	override async fetch(request: Request) {
 		if (request.url.endsWith("/index.md")) {
-			const res = await this.env.ASSETS.fetch(
-				request.url.replace("index.md", ""),
-				request,
-			);
+			const htmlUrl = request.url.replace("index.md", "");
+			const res = await this.env.ASSETS.fetch(htmlUrl, request);
 
 			if (res.status === 404) {
 				return res;
@@ -35,8 +33,9 @@ export default class extends WorkerEntrypoint<Env> {
 				res.headers.get("content-type")?.startsWith("text/html")
 			) {
 				const html = await res.text();
+				const dom = parse(html);
 
-				const content = parse(html).querySelector(".sl-markdown-content");
+				const content = dom.querySelector(".sl-markdown-content");
 
 				if (!content) {
 					return new Response("Not Found", { status: 404 });
@@ -51,7 +50,27 @@ export default class extends WorkerEntrypoint<Env> {
 					remarkStringify,
 				]);
 
-				return new Response(markdown, {
+				const title = dom.querySelector("title")?.textContent;
+				const description = dom.querySelector("meta[name='description']")
+					?.attributes.content;
+				const lastUpdated =
+					dom.querySelector(".meta time")?.attributes.datetime;
+
+				const withFrontmatter = [
+					"---",
+					`title: ${title}`,
+					description ? `description: ${description}` : [],
+					lastUpdated ? `lastUpdated: ${lastUpdated}` : [],
+					`source_url:`,
+					`  html: ${htmlUrl}`,
+					`  md: ${request.url}`,
+					"---\n",
+					markdown,
+				]
+					.flat()
+					.join("\n");
+
+				return new Response(withFrontmatter, {
 					headers: {
 						"content-type": "text/markdown; charset=utf-8",
 					},
